@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>All-Time Leaderboard</title>
+
+<!--
+  This page reads from alltime/ in your Firebase Realtime Database —
+  the same Firebase project as your main leaderboard.
+  Replace FIREBASE_CONFIG below with the same values you used in
+  leaderboard-firebase.html.
+-->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+
+<style>
+  :root{
+    --blue:#2F449C;
+    --blue-deep:#233574;
+    --blue-line:rgba(47,68,156,0.25);
+    --white:#ffffff;
+    --ink:#1c2a5e;
+    --muted:#8b95c2;
+    --success:#2f9e5c;
+    --font-display:'Fredoka',Arial,sans-serif;
+    --font-body:Arial,"Helvetica Neue",Helvetica,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:var(--font-body);
+    background:#eef0fa;
+    min-height:100vh;
+    padding:3vh 3vw;
+    color:var(--ink);
+  }
+  button{font-family:var(--font-body);cursor:pointer;}
+
+  .page-header{
+    max-width:900px; margin:0 auto 18px auto;
+    display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:12px;
+  }
+  .page-title{
+    font-family:var(--font-display); font-weight:700; color:var(--blue-deep);
+    font-size:clamp(22px,4vw,32px); margin:0;
+  }
+  .page-sub{ font-size:13px; color:var(--muted); margin:2px 0 0 0; }
+
+  .controls{
+    display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+  }
+  .filter-input{
+    padding:8px 12px; border:1.5px solid var(--blue-line); border-radius:30px;
+    font-size:13px; font-family:var(--font-body); color:var(--ink);
+    background:#fff; min-width:160px;
+  }
+  .filter-input:focus{ outline:none; border-color:var(--blue); }
+  .sort-btn{
+    padding:8px 14px; border:1.5px solid var(--blue-line); border-radius:30px;
+    font-size:12.5px; font-weight:700; background:#fff; color:var(--ink);
+    transition:background .15s,color .15s;
+  }
+  .sort-btn.active{ background:var(--blue); color:#fff; border-color:var(--blue); }
+
+  .conn-status{
+    max-width:900px; margin:0 auto 10px auto;
+    font-size:11.5px; font-weight:700; letter-spacing:.04em;
+    text-transform:uppercase;
+  }
+  .conn-status.connecting{ color:var(--muted); }
+  .conn-status.live{ color:var(--success); }
+  .conn-status.error{ color:#c0392b; }
+  .conn-dot{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; }
+  .conn-status.connecting .conn-dot{ background:var(--muted); animation:pd 1.2s ease-in-out infinite; }
+  .conn-status.live .conn-dot{ background:var(--success); }
+  .conn-status.error .conn-dot{ background:#c0392b; }
+  @keyframes pd{ 0%,100%{opacity:.4;}50%{opacity:1;} }
+
+  .stats-row{
+    max-width:900px; margin:0 auto 14px auto;
+    display:flex; gap:12px; flex-wrap:wrap;
+  }
+  .stat-card{
+    background:#fff; border:2px solid var(--blue-line); border-radius:12px;
+    padding:12px 18px; flex:1; min-width:120px; text-align:center;
+  }
+  .stat-num{ font-family:var(--font-display); font-size:26px; font-weight:700; color:var(--blue-deep); }
+  .stat-label{ font-size:11px; color:var(--muted); font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+
+  .board{
+    max-width:900px; margin:0 auto;
+    background:#fff; border:3px solid var(--blue); border-radius:16px;
+    overflow:hidden; box-shadow:0 10px 30px rgba(35,53,116,0.12);
+  }
+  .board-header{
+    background:var(--blue); color:#fff;
+    display:grid; grid-template-columns:70px 1fr 110px 1fr 100px;
+  }
+  .board-header div{
+    font-family:var(--font-display); font-weight:600; letter-spacing:.05em;
+    text-transform:uppercase; font-size:clamp(11px,1.6vw,14px);
+    padding:12px 10px; text-align:center;
+  }
+  .board-header div:nth-child(2),
+  .board-header div:nth-child(4){ text-align:left; padding-left:16px; }
+
+  .board-rows{ max-height:65vh; overflow-y:auto; }
+  .row{
+    display:grid; grid-template-columns:70px 1fr 110px 1fr 100px;
+    border-bottom:1.5px solid var(--blue-line);
+    transition:background .2s;
+  }
+  .row:last-child{ border-bottom:none; }
+  .row.gold{  background:rgba(255,209,102,0.22); }
+  .row.silver{ background:rgba(200,210,240,0.30); }
+  .row.bronze{ background:rgba(224,180,140,0.18); }
+
+  .cell{ padding:11px 10px; font-size:clamp(12px,1.8vw,14px); display:flex; align-items:center; }
+  .cell.place{ justify-content:center; font-family:var(--font-display); font-weight:700; color:var(--blue-deep); }
+  .cell.team{ padding-left:16px; font-weight:600; word-break:break-word; }
+  .cell.time{ justify-content:center; font-variant-numeric:tabular-nums; font-weight:700; color:var(--blue); }
+  .cell.event{ padding-left:16px; font-size:12px; color:var(--muted); }
+  .cell.date{ justify-content:center; font-size:12px; color:var(--muted); }
+  .medal{ font-size:16px; margin-right:4px; }
+
+  .empty-state{
+    text-align:center; padding:48px 20px; color:var(--muted); font-size:14px;
+  }
+
+  @media(max-width:560px){
+    .board-header{ grid-template-columns:56px 1fr 90px; }
+    .board-header div:nth-child(4),
+    .board-header div:nth-child(5){ display:none; }
+    .row{ grid-template-columns:56px 1fr 90px; }
+    .cell.event,.cell.date{ display:none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="conn-status connecting" id="conn-status"><span class="conn-dot"></span>Connecting…</div>
+
+<div class="page-header">
+  <div>
+    <h1 class="page-title">🏆 All-Time Leaderboard</h1>
+    <p class="page-sub" id="page-sub">Every team, every event — can you beat the best?</p>
+  </div>
+  <div class="controls">
+    <input class="filter-input" id="filter-input" type="text" placeholder="Search team or event…">
+    <button class="sort-btn active" id="sort-time">Fastest First</button>
+    <button class="sort-btn" id="sort-date">Most Recent</button>
+  </div>
+</div>
+
+<div class="stats-row" id="stats-row">
+  <div class="stat-card"><div class="stat-num" id="stat-teams">–</div><div class="stat-label">Teams</div></div>
+  <div class="stat-card"><div class="stat-num" id="stat-events">–</div><div class="stat-label">Events</div></div>
+  <div class="stat-card"><div class="stat-num" id="stat-best">–</div><div class="stat-label">Best Time</div></div>
+</div>
+
+<div class="board">
+  <div class="board-header">
+    <div>Rank</div>
+    <div>Team</div>
+    <div>Time</div>
+    <div>Event</div>
+    <div>Date</div>
+  </div>
+  <div class="board-rows" id="board-rows">
+    <div class="empty-state">Connecting to database…</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const FIREBASE_CONFIG = {
+  apiKey: "REPLACE_ME",
+  authDomain: "REPLACE_ME.firebaseapp.com",
+  databaseURL: "https://REPLACE_ME-default-rtdb.firebaseio.com",
+  projectId: "REPLACE_ME",
+  storageBucket: "REPLACE_ME.appspot.com",
+  messagingSenderId: "REPLACE_ME",
+  appId: "REPLACE_ME"
+};
+
+let allEntries = [];
+let sortMode = 'time'; // 'time' | 'date'
+let filterText = '';
+
+function fmtTime(s){
+  const m = Math.floor(s/60);
+  return `${m}:${String(s%60).padStart(2,'0')}`;
+}
+
+function fmtDate(ts){
+  if(!ts) return '';
+  return new Date(ts).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
+
+function getDisplayed(){
+  let list = [...allEntries];
+  if(filterText){
+    const q = filterText.toLowerCase();
+    list = list.filter(e=>
+      (e.team||'').toLowerCase().includes(q) ||
+      (e.eventName||'').toLowerCase().includes(q) ||
+      (e.eventLocation||'').toLowerCase().includes(q)
+    );
+  }
+  if(sortMode==='time'){
+    list.sort((a,b)=>a.totalSeconds-b.totalSeconds);
+  } else {
+    list.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
+  }
+  return list;
+}
+
+function renderBoard(){
+  const list = getDisplayed();
+  const rowsEl = document.getElementById('board-rows');
+  rowsEl.innerHTML='';
+
+  if(list.length===0){
+    rowsEl.innerHTML='<div class="empty-state">' +
+      (filterText ? 'No results match your search.' : 'No entries yet — be the first!') +
+      '</div>';
+    return;
+  }
+
+  list.forEach((e,i)=>{
+    const row = document.createElement('div');
+    row.className = 'row' + (i===0?' gold':i===1?' silver':i===2?' bronze':'');
+    const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+    const eventStr = [e.eventName, e.eventLocation].filter(Boolean).join(' · ');
+    row.innerHTML = `
+      <div class="cell place">${medal?`<span class="medal">${medal}</span>`:''}${i+1}</div>
+      <div class="cell team">${esc(e.team||'')}</div>
+      <div class="cell time">${fmtTime(e.totalSeconds)}</div>
+      <div class="cell event">${esc(eventStr)}</div>
+      <div class="cell date">${e.eventDate || fmtDate(e.timestamp)}</div>`;
+    rowsEl.appendChild(row);
+  });
+}
+
+function renderStats(){
+  const all = allEntries;
+  const events = new Set(all.map(e=>e.eventName||'').filter(Boolean));
+  const best = all.length ? Math.min(...all.map(e=>e.totalSeconds)) : null;
+  document.getElementById('stat-teams').textContent  = all.length;
+  document.getElementById('stat-events').textContent = events.size || '–';
+  document.getElementById('stat-best').textContent   = best!=null ? fmtTime(best) : '–';
+  if(all.length>0){
+    document.getElementById('page-sub').textContent =
+      `${all.length} team${all.length===1?'':'s'} across ${events.size||'multiple'} event${events.size===1?'':'s'} — can you beat the best?`;
+  }
+}
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// Sort buttons
+document.getElementById('sort-time').addEventListener('click',()=>{
+  sortMode='time';
+  document.getElementById('sort-time').classList.add('active');
+  document.getElementById('sort-date').classList.remove('active');
+  renderBoard();
+});
+document.getElementById('sort-date').addEventListener('click',()=>{
+  sortMode='date';
+  document.getElementById('sort-date').classList.add('active');
+  document.getElementById('sort-time').classList.remove('active');
+  renderBoard();
+});
+
+// Live search filter
+document.getElementById('filter-input').addEventListener('input', e=>{
+  filterText = e.target.value.trim();
+  renderBoard();
+});
+
+// Firebase
+try{
+  firebase.initializeApp(FIREBASE_CONFIG);
+  const db = firebase.database();
+
+  db.ref('.info/connected').on('value', snap=>{
+    const statusEl = document.getElementById('conn-status');
+    if(snap.val()===true){
+      statusEl.className='conn-status live';
+      statusEl.innerHTML='<span class="conn-dot"></span>Live';
+    } else {
+      statusEl.className='conn-status connecting';
+      statusEl.innerHTML='<span class="conn-dot"></span>Reconnecting…';
+    }
+  });
+
+  // alltime/ is the permanent path — never reset
+  db.ref('alltime').on('value', snap=>{
+    allEntries=[];
+    snap.forEach(child=>{ allEntries.push({id:child.key,...child.val()}); });
+    renderStats();
+    renderBoard();
+  }, err=>{
+    const statusEl=document.getElementById('conn-status');
+    statusEl.className='conn-status error';
+    statusEl.innerHTML='<span class="conn-dot"></span>Connection error — check FIREBASE_CONFIG';
+    console.error(err);
+  });
+}catch(err){
+  const statusEl=document.getElementById('conn-status');
+  statusEl.className='conn-status error';
+  statusEl.innerHTML='<span class="conn-dot"></span>Connection error — check FIREBASE_CONFIG';
+  console.error(err);
+}
+</script>
+</body>
+</html>

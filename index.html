@@ -135,9 +135,58 @@
     .row{ grid-template-columns:56px 1fr 90px; }
     .cell.event,.cell.date{ display:none; }
   }
-</style>
+
+  /* ===== ADMIN ===== */
+  .admin-gear{
+    position:fixed; bottom:10px; right:10px; z-index:500;
+    width:32px; height:32px; border-radius:50%; border:none;
+    background:rgba(35,53,116,0.35); color:#fff; font-size:15px;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .admin-overlay{
+    display:none; position:fixed; inset:0; z-index:999;
+    background:rgba(20,25,60,0.55);
+    align-items:center; justify-content:center; padding:20px;
+  }
+  .admin-overlay.show{ display:flex; }
+  .admin-pin-box{
+    background:#fff; border-radius:14px; padding:24px 26px;
+    max-width:260px; width:100%; text-align:center;
+  }
+  .admin-pin-box h3{ margin:0 0 10px 0; color:var(--blue-deep); font-size:18px; }
+  .admin-pin-box input{
+    width:100%; padding:10px; font-size:20px; text-align:center;
+    letter-spacing:.3em; border:1px solid #ccc; border-radius:8px; margin-bottom:10px;
+    font-family:inherit;
+  }
+  .admin-pin-box button{ width:100%; padding:9px; border:none; border-radius:8px; background:var(--blue); color:#fff; font-weight:700; font-size:14px; cursor:pointer; }
+  .admin-pin-err{ color:#c0392b; font-size:11px; min-height:14px; margin-bottom:4px; }
+  .admin-panel{
+    background:#fff; border-radius:14px; max-width:660px; width:100%;
+    max-height:88vh; overflow-y:auto; padding:22px 24px; text-align:left;
+    color:var(--ink);
+  }
+  .admin-panel h2{ margin:0 0 4px 0; color:var(--blue-deep); font-size:20px; }
+  .admin-panel .note{ font-size:12px; color:#888; margin:0 0 14px 0; line-height:1.5; }
+  .at-row-entry{
+    display:flex; gap:8px; align-items:center;
+    border:1px solid #eee; border-radius:8px; padding:8px 10px; margin-bottom:6px;
+  }
+  .at-row-info{ flex:1; min-width:0; }
+  .at-row-team{ font-weight:700; font-size:13.5px; color:var(--blue-deep); margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .at-row-meta{ font-size:11px; color:var(--muted); }
+  .at-rm-btn{
+    flex:0 0 auto; background:#fde2e2; color:#a02020; border:none;
+    border-radius:6px; padding:7px 11px; font-size:11px; font-weight:700; cursor:pointer;
+  }
+  .admin-actions{ display:flex; gap:8px; margin-top:16px; }
+  .admin-actions button{ flex:1; padding:10px; border-radius:8px; border:none; font-weight:800; font-size:13px; cursor:pointer; }
+  .btn-close{ background:#eee; color:#333; }</style>
 </head>
 <body>
+
+<button class="admin-gear" id="admin-gear">&#9881;</button>
+<div class="admin-overlay" id="admin-overlay"></div>
 
 <div class="conn-status connecting" id="conn-status"><span class="conn-dot"></span>Connecting…</div>
 
@@ -312,6 +361,86 @@ try{
   statusEl.className='conn-status error';
   statusEl.innerHTML='<span class="conn-dot"></span>Connection error — check FIREBASE_CONFIG';
   console.error(err);
+}
+
+/* ================================================================
+   ADMIN MODE — remove entries from the permanent all-time record
+   Same PIN as the main leaderboard (default 1000, changeable there).
+   ================================================================ */
+const ADMIN_PIN = '1000'; // keep in sync with your main leaderboard PIN
+
+const adminGear = document.getElementById('admin-gear');
+const adminOv   = document.getElementById('admin-overlay');
+
+adminGear.addEventListener('click', openAdminPin);
+document.addEventListener('keydown', e=>{
+  if(e.ctrlKey && e.shiftKey && (e.key==='A'||e.key==='a')){ e.preventDefault(); openAdminPin(); }
+});
+
+function openAdminPin(){
+  adminOv.classList.add('show');
+  adminOv.innerHTML=`
+    <div class="admin-pin-box">
+      <h3>Admin Mode</h3>
+      <div class="admin-pin-err" id="ap-err"></div>
+      <input type="password" id="ap-in" inputmode="numeric" maxlength="8" placeholder="PIN" autofocus>
+      <button id="ap-btn">Unlock</button>
+    </div>`;
+  document.getElementById('ap-btn').onclick = checkPin;
+  document.getElementById('ap-in').onkeydown = e=>{ if(e.key==='Enter') checkPin(); };
+  adminOv.onclick = e=>{ if(e.target===adminOv) adminOv.classList.remove('show'); };
+  setTimeout(()=>document.getElementById('ap-in').focus(), 50);
+}
+
+function checkPin(){
+  if(document.getElementById('ap-in').value === ADMIN_PIN) renderAdminPanel();
+  else document.getElementById('ap-err').textContent = 'Incorrect PIN.';
+}
+
+function renderAdminPanel(){
+  // Sort all entries fastest first for the admin view
+  const sorted = [...allEntries].sort((a,b)=>a.totalSeconds-b.totalSeconds);
+  adminOv.innerHTML=`
+    <div class="admin-panel">
+      <h2>All-Time Record — Admin</h2>
+      <p class="note">Remove individual entries from the permanent all-time record. This cannot be undone. Removing here does not affect the current event leaderboard.</p>
+      <div id="at-entries">
+        ${sorted.length===0
+          ? '<p style="color:#888;font-size:13px;text-align:center;">No entries yet.</p>'
+          : sorted.map(e=>`
+            <div class="at-row-entry">
+              <div class="at-row-info">
+                <div class="at-row-team">${esc(e.team)}</div>
+                <div class="at-row-meta">${fmtTime(e.totalSeconds)}
+                  ${e.eventName ? ' · ' + esc(e.eventName) : ''}
+                  ${e.eventDate ? ' · ' + esc(e.eventDate) : ''}
+                  ${e.eventLocation ? ' · ' + esc(e.eventLocation) : ''}
+                </div>
+              </div>
+              <button type="button" class="at-rm-btn" onclick="removeAlltimeEntry('${e.id}')">Remove</button>
+            </div>`).join('')
+        }
+      </div>
+      <div class="admin-actions">
+        <button class="btn-close" id="at-close">Close</button>
+      </div>
+    </div>`;
+  document.getElementById('at-close').onclick = ()=>adminOv.classList.remove('show');
+}
+
+function removeAlltimeEntry(id){
+  if(!confirm('Remove this entry from the all-time record? This cannot be undone.')) return;
+  // db is declared in the Firebase init block above
+  firebase.database().ref('alltime/' + id).remove()
+    .then(()=>{
+      // allEntries updates automatically via the live listener,
+      // which re-renders the board — just re-render the admin panel too.
+      renderAdminPanel();
+    })
+    .catch(err=>{
+      alert('Could not remove — check your connection and try again.');
+      console.error(err);
+    });
 }
 </script>
 </body>
